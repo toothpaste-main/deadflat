@@ -12,9 +12,11 @@ For every ``.vmat`` material file found under ``content_root``:
 
   * Any texture bound to a "color"-like slot (TextureColor, TextureDiffuse,
     TextureAlbedo, ...) is replaced with a same-size image whose RGB is the
-    average color of the original texture, with the original per-pixel
-    alpha preserved. Alpha is preserved (rather than also being flattened)
-    so that alpha-tested foliage/fence/grate cards keep their cutout
+    average color of the original texture, desaturated to a grey of the
+    same luma (pass --keep-hue to skip the desaturation step and keep each
+    material's own average hue instead), with the original per-pixel alpha
+    preserved. Alpha is preserved (rather than also being flattened) so
+    that alpha-tested foliage/fence/grate cards keep their cutout
     silhouette instead of turning into solid rectangles. Fully opaque
     textures are additionally shrunk to a tiny flat swatch, since a
     uniform color has no spatial detail worth keeping at full resolution.
@@ -23,13 +25,16 @@ For every ``.vmat`` material file found under ``content_root``:
     (128, 128, 255) -- i.e. "no bump" -- while its alpha channel is left
     alone, because some Source 2 shaders pack a roughness/smoothness mask
     into the normal map's alpha channel and blindly flattening it would
-    change shading in ways nobody asked for.
+    change shading in ways nobody asked for. This is left as the fixed
+    "no bump" encoding rather than desaturated to grey, since (128, 128,
+    255) is a direction, not a perceived color -- changing its blue
+    channel would tilt every surface's normal instead of neutralizing it.
   * Roughness and ambient-occlusion textures are left untouched unless you
     pass --flatten-roughness / --flatten-ao.
 
 A texture that is shared by multiple materials (e.g. a tiling ground
 texture) is only processed once and reused, so every material that used
-that texture ends up the same flat color.
+that texture ends up the same flat grey.
 
 The script never guesses at exact Source 2 shader parameter names beyond
 simple keyword matching, and it never guesses at the internal structure of
@@ -46,6 +51,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import logging
 import re
@@ -89,6 +95,7 @@ class RoleConfig:
     preserve_alpha: bool
     neutral_rgb: tuple[int, int, int] | None  # None means "use the average"
     shrink_if_opaque: bool
+    desaturate: bool = False  # collapse the computed average to a grey shade
 
 
 DEFAULT_ROLES: tuple[RoleConfig, ...] = (
@@ -98,6 +105,7 @@ DEFAULT_ROLES: tuple[RoleConfig, ...] = (
         preserve_alpha=True,
         neutral_rgb=None,
         shrink_if_opaque=True,
+        desaturate=True,
     ),
     RoleConfig(
         name="normal",
@@ -105,6 +113,10 @@ DEFAULT_ROLES: tuple[RoleConfig, ...] = (
         preserve_alpha=True,
         neutral_rgb=(128, 128, 255),
         shrink_if_opaque=False,
+        # Not desaturated: (128, 128, 255) is the fixed "no bump" tangent-
+        # space encoding, not a perceived color -- flattening its blue
+        # channel to match grey would tilt every surface's normal instead
+        # of leaving it neutral.
     ),
 )
 
@@ -115,6 +127,7 @@ OPTIONAL_ROLES: dict[str, RoleConfig] = {
         preserve_alpha=False,
         neutral_rgb=None,
         shrink_if_opaque=True,
+        desaturate=True,  # a no-op in practice: roughness maps are already grey
     ),
     "ao": RoleConfig(
         name="ao",
@@ -236,6 +249,14 @@ def find_image_ref_in_vtex(vtex_path: Path) -> Path | None:
     return None
 
 
+def rgb_to_grey(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Collapse an RGB color to a perceptual-luma grey (Rec. 709 weights)."""
+    r, g, b = rgb
+    luma = round(0.2126 * r + 0.7152 * g + 0.0722 * b)
+    luma = max(0, min(255, luma))
+    return (luma, luma, luma)
+
+
 def compute_flat_image(image_path: Path, role: RoleConfig) -> tuple[Image.Image, tuple[int, int, int]]:
     """Build the flattened replacement image for one source texture.
 
@@ -263,6 +284,8 @@ def compute_flat_image(image_path: Path, role: RoleConfig) -> tuple[Image.Image,
             avg_rgb = (128, 128, 128)
         else:
             avg_rgb = (total[0] // count, total[1] // count, total[2] // count)
+        if role.desaturate:
+            avg_rgb = rgb_to_grey(avg_rgb)
 
     fully_opaque = not has_alpha or all(a == 255 for *_, a in pixels)
 
@@ -440,6 +463,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Also flatten ambient-occlusion textures to flat white.",
     )
     parser.add_argument(
+        "--keep-hue",
+        action="store_true",
+        help=(
+            "Keep each material's averaged color as-is instead of "
+            "desaturating it to a grey shade (desaturating is the default)."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report what would change without writing any files.",
@@ -468,6 +499,8 @@ def main(argv: list[str] | None = None) -> int:
         roles += (OPTIONAL_ROLES["roughness"],)
     if args.flatten_ao:
         roles += (OPTIONAL_ROLES["ao"],)
+    if args.keep_hue:
+        roles = tuple(dataclasses.replace(role, desaturate=False) for role in roles)
 
     vmat_files = find_vmat_files(content_root)
     if not vmat_files:
