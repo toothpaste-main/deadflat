@@ -1,16 +1,19 @@
-# Deadflat -- Deadlock flat-shading map guide
+# Deadlock flat-shading map mod — build guide
 
 ## What this produces
 
 Every material used by the map's world geometry gets replaced with a flat,
 untextured version: no normal map (so no fake bump/detail from lighting),
-and a single solid color per material computed as the desaturated average color of
-whatever texture it used to have. A brick wall becomes flat brown, a
-concrete floor becomes flat grey, a patch of grass becomes flat green —
-each material keeps its own distinct shade rather than everything becoming
-one uniform color, but nothing has surface detail anymore. Alpha-cutout
-materials (leaf cards, fences, grates) keep their cutout silhouette; only
-their color is flattened, so they don't turn into solid rectangles.
+and a single solid grey per material, computed as the average color of
+whatever texture it used to have, desaturated to the equivalent grey
+(luma-weighted, so a light material stays lighter than a dark one). A brick
+wall becomes a mid grey, a patch of grass becomes a different, lighter grey
+— each material keeps its own distinct shade rather than everything
+becoming one uniform value, but there's no hue left anywhere and nothing
+has surface detail anymore. Alpha-cutout materials (leaf cards, fences,
+grates) keep their cutout silhouette; only their color is flattened, so
+they don't turn into solid rectangles. Pass `--keep-hue` to the script if
+you ever want each material's original average color back instead of grey.
 
 This can't be built or tested from here — it needs your local Deadlock
 install and Valve's Source 2 tooling, which only run on your machine. What
@@ -93,8 +96,9 @@ python3 flatten_map_materials.py /path/to/your/addon/content
 This walks every `.vmat` under that folder and, for each one:
 
 - Resolves its color texture, computes the average RGB (ignoring fully
-  transparent pixels), and writes a same-size replacement if any pixel is
-  translucent (preserving the cutout), or a tiny 8×8 flat swatch otherwise.
+  transparent pixels), desaturates that average to a grey of the same
+  luma, and writes a same-size replacement if any pixel is translucent
+  (preserving the cutout), or a tiny 8×8 flat swatch otherwise.
 - Resolves its normal texture and replaces it with a neutral flat normal
   (128, 128, 255), preserving that texture's own alpha channel untouched
   (some Deadlock materials may pack a roughness/smoothness mask there —
@@ -109,8 +113,11 @@ This walks every `.vmat` under that folder and, for each one:
 
 Useful flags:
 
-- `--dry-run` — report what it would do without writing anything. Good for
-  a first pass over the whole folder before committing to it.
+- `--dry-run` — don't touch any material/texture files, but still write
+  `flatten_report.json` so you can review the plan first. Good for a first
+  pass over the whole folder before committing to it.
+- `--keep-hue` — skip the desaturation step and keep each material's own
+  average color instead of converting it to grey.
 - `--flatten-roughness` / `--flatten-ao` — also flatten roughness and
   ambient-occlusion textures. Not required by the "flat color, no normal
   map" spec, but AO maps in particular can still visibly darken corners and
@@ -177,11 +184,11 @@ re-touch ones it already flattened.
   VPK folders are "the map's meshes" versus hero/item/UI art without seeing
   your decompile — that part of Step 1 is on you, using Source 2 Viewer's
   browser.
-- **Shared textures get one shared color**, by design — if two different
+- **Shared textures get one shared grey**, by design — if two different
   building facades used the same tiling brick texture, they'll end up the
-  exact same shade of brown, not two different browns. That's the "average
+  exact same shade of grey, not two different shades. That's the "average
   per material" approach; the alternative (a hand-authored category palette
-  where every building is forced to one fixed hardcoded brown regardless of
+  where every building is forced to one fixed hardcoded shade regardless of
   its original texture) was the other option we discussed and didn't go
   with — let me know if you'd rather have that instead, it's a different
   script.
