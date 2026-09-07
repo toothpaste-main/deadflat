@@ -1,4 +1,4 @@
-# Deadlock flat-shading map mod — build guide
+# Deadflat -- Deadlock flat-shading map guide
 
 ## What this produces
 
