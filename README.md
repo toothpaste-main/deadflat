@@ -4,7 +4,7 @@
 
 Every material used by the map's world geometry gets replaced with a flat,
 untextured version: no normal map (so no fake bump/detail from lighting),
-and a single solid color per material computed as the average color of
+and a single solid color per material computed as the desaturated average color of
 whatever texture it used to have. A brick wall becomes flat brown, a
 concrete floor becomes flat grey, a patch of grass becomes flat green —
 each material keeps its own distinct shade rather than everything becoming
