@@ -30,22 +30,25 @@ a chat session.
    *environment-art* folders (buildings/ground/props — not `heroes/`,
    `items/`, `ui/`, particles), preserving paths, into that addon's
    `content` folder.
-3. **Sanity-check one file** before running the script on everything: open
-   a decompiled `.vmat` and confirm its texture keys look like
-   `TextureColor = resource:"...vtex"` / `TextureNormal = resource:"...vtex"`,
-   and that its `.vtex` contains a quoted image path (e.g.
-   `m_fileName = "foo_color.tga"`). If it looks very different, flag it
-   before proceeding.
-4. **Run the script** (see [Usage](#usage) below) against that `content`
+
+> [!TIP]
+> **Sanity-check one file** before running the script on everything: open
+> a decompiled `.vmat` and confirm its texture keys look like
+> `TextureColor = resource:"...vtex"` / `TextureNormal = resource:"...vtex"`,
+> and that its `.vtex` contains a quoted image path (e.g.
+> `m_fileName = "foo_color.tga"`). If it looks very different, flag it
+> before proceeding.
+
+3. **Run the script** (see [Usage](#usage) below) against that `content`
    folder, then check `flatten_report.json`.
-5. **Recompile** the changed `.vmat`/`.vtex` files in CSDK 12's Asset
+4. **Recompile** the changed `.vmat`/`.vtex` files in CSDK 12's Asset
    Browser (right-click → Recompile > Full).
-6. **Pack the addon**: CS2 Workshop Manager (bundled with CSDK 12) → New →
+5. **Pack the addon**: CS2 Workshop Manager (bundled with CSDK 12) → New →
    fill placeholder info → build (the submission itself will fail — that's
    expected). Use Multichunk Workshop Manager instead if it's over 2 GB.
    Rename the output to `pak0N_dir.vpk` (01–99) and copy it into
    `<Deadlock install>/game/citadel/addons/`.
-7. **Launch Deadlock** and check the map.
+6. **Launch Deadlock** and check the map.
 
 ## Usage
 
