@@ -1,201 +1,88 @@
-# Deadlock flat-shading map mod — build guide
+# Deadlock Flat-Shading Map Mod
 
-## What this produces
+Replaces every map material with a flat grey — no normal maps, no texture
+detail. Each material gets its own shade (luma-matched to its original
+texture, then desaturated), so surfaces stay distinguishable from each
+other. Alpha-cutout materials (foliage, fences) keep their cutout shape.
 
-Every material used by the map's world geometry gets replaced with a flat,
-untextured version: no normal map (so no fake bump/detail from lighting),
-and a single solid grey per material, computed as the average color of
-whatever texture it used to have, desaturated to the equivalent grey
-(luma-weighted, so a light material stays lighter than a dark one). A brick
-wall becomes a mid grey, a patch of grass becomes a different, lighter grey
-— each material keeps its own distinct shade rather than everything
-becoming one uniform value, but there's no hue left anywhere and nothing
-has surface detail anymore. Alpha-cutout materials (leaf cards, fences,
-grates) keep their cutout silhouette; only their color is flattened, so
-they don't turn into solid rectangles. Pass `--keep-hue` to the script if
-you ever want each material's original average color back instead of grey.
-
-This can't be built or tested from here — it needs your local Deadlock
-install and Valve's Source 2 tooling, which only run on your machine. What
-follows is the full pipeline: extract → flatten → recompile → pack → install.
-I already wrote and tested the flattening script (`flatten_map_materials.py`)
-against synthetic Source 2-shaped material files, so the logic is sound;
-what I can't verify from here is the exact text format your specific
-Deadlock decompile produces, since that depends on your Source 2 Viewer
-version. Step 3 below tells you how to sanity-check that quickly before
-running it over everything.
+Everything below except running `flatten_map_materials.py` itself happens
+on your machine with Valve's Source 2 tools — none of it can be done from
+a chat session.
 
 ## Requirements
 
-- Deadlock installed via Steam.
-- [Source 2 Viewer](https://s2v.app/) (also called `Source2Viewer` /
-  `HLExtract`'s successor) — for decompiling materials out of the game's VPK.
-- **CSDK 12** — the community-assembled Deadlock SDK (CS2's Workshop Tools
-  merged with community fixes). Get it from the Deadlock Modding Notes site's
-  tools page and its linked Google Drive download; extract it somewhere
-  *outside* any OneDrive-synced folder (Desktop/Documents can cause file
-  permission issues), then run `csdkcfg.exe` to configure it.
-- Python 3.10+ with Pillow (`pip install --break-system-packages pillow`)
-  installed wherever you'll run the script — this can be the same machine.
+- **Python 3.10+ with Pillow.** PowerShell: `python --version` (try `py
+  --version` if that fails — Windows often skips registering `python3`).
+  Then `pip install pillow` (skip `--break-system-packages`; that's a
+  Linux-only workaround).
+- **[Source 2 Viewer](https://s2v.app/)** — decompiles the game's materials.
+- **CSDK 12** — the community Deadlock SDK (Deadlock Modding Notes site's
+  tools page). Needed to recompile and pack the mod; Source 2 Viewer alone
+  can't do either. Extract outside any OneDrive-synced folder, then run
+  `csdkcfg.exe`.
 
-## Step 1 — Find the map's materials
+## Quick start
 
-Open `game/citadel/pak01_dir.vpk` (inside your Deadlock install folder) in
-Source 2 Viewer. Browse the `materials/` tree. You're looking for whatever
-subfolders hold *environment art* — building facades, terrain/ground tiles,
-foliage, props used to dress the map — as opposed to `materials/heroes/`,
-`materials/items/`, `materials/ui/`, or particle-related folders, which you
-don't want to touch. I can't tell you the exact folder names without seeing
-your VPK's contents myself, but they should be recognizable once you're
-browsing — often something like `world/`, `props/`, `city_construction_kit/`,
-or similarly named. If Source 2 Viewer can decompile the map's own `.vmap`
-file, doing that first can also surface exactly which materials it
-references.
+1. **Create an addon project** in CSDK 12's Asset Browser — gives you a
+   `content/<addon>` (source) / `game/<addon>` (compiled) folder pair.
+2. **Decompile the map's materials** in Source 2 Viewer: open
+   `game/citadel/pak01_dir.vpk`, browse `materials/`, and export only the
+   *environment-art* folders (buildings/ground/props — not `heroes/`,
+   `items/`, `ui/`, particles), preserving paths, into that addon's
+   `content` folder.
+3. **Sanity-check one file** before running the script on everything: open
+   a decompiled `.vmat` and confirm its texture keys look like
+   `TextureColor = resource:"...vtex"` / `TextureNormal = resource:"...vtex"`,
+   and that its `.vtex` contains a quoted image path (e.g.
+   `m_fileName = "foo_color.tga"`). If it looks very different, flag it
+   before proceeding.
+4. **Run the script** (see [Usage](#usage) below) against that `content`
+   folder, then check `flatten_report.json`.
+5. **Recompile** the changed `.vmat`/`.vtex` files in CSDK 12's Asset
+   Browser (right-click → Recompile > Full).
+6. **Pack the addon**: CS2 Workshop Manager (bundled with CSDK 12) → New →
+   fill placeholder info → build (the submission itself will fail — that's
+   expected). Use Multichunk Workshop Manager instead if it's over 2 GB.
+   Rename the output to `pak0N_dir.vpk` (01–99) and copy it into
+   `<Deadlock install>/game/citadel/addons/`.
+7. **Launch Deadlock** and check the map.
 
-Multi-select those folders, right-click, and **Decompile & Export**,
-preserving the file paths (Source 2 Viewer does this by default). Export
-into a fresh `content` folder — this becomes your addon's raw-source folder.
-Ideally, set this to be the `content` folder CSDK 12 generates when you
-create a new addon project (Step 4 covers creating that addon), so you don't
-have to move files afterward.
-
-This step matters most for scope: you'll get a `.vmat` file plus one or more
-`.vtex` + image files per material. On a full map, expect this to be
-hundreds of files. That's fine — the script handles arbitrarily many.
-
-## Step 2 — Sanity-check the format once
-
-Before running the script on everything, open **one** decompiled `.vmat`
-file in a text editor and look at how its texture references are written.
-You want to see something like:
+## Usage
 
 ```
-TextureColor = resource:"materials/whatever/foo_color.vtex"
-TextureNormal = resource:"materials/whatever/foo_normal.vtex"
+python flatten_map_materials.py <content_folder> [options]
 ```
 
-The script matches on the parameter *key* containing "color"/"diffuse"/
-"albedo" (for the base color slot) or "normal"/"bump" (for the normal map
-slot) case-insensitively, so it doesn't need an exact key name — but if your
-decompile uses something wildly different (no "color"/"normal" substring at
-all in the key), tell me and I'll adjust the matching before you run it over
-everything.
+`<content_folder>` is the decompiled addon folder containing `.vmat` +
+`.vtex` + image files together (with the `materials/...` structure intact)
+— not a folder of images alone.
 
-Also peek inside the `.vtex` file that `TextureColor` points to — it's a
-small text stub, and somewhere in it should be a quoted path ending in
-`.tga`/`.png`/etc. (e.g. `m_fileName = "foo_color.tga"`). That's the actual
-image the script will average. If that image sits in the same folder as the
-`.vtex` (the common case), you're set.
+| Flag | Effect |
+|---|---|
+| *(none)* | Flatten color to a desaturated grey per material, normal maps to neutral (128,128,255), and write the changes. |
+| `--dry-run` | Compute and report everything, write `flatten_report.json`, but don't touch any material/texture files. Run this first. |
+| `--keep-hue` | Keep each material's own averaged color instead of desaturating it to grey. |
+| `--flatten-roughness` | Also flatten roughness textures to their average value. |
+| `--flatten-ao` | Also flatten ambient-occlusion textures to flat white — useful if AO shadowing still shows through corners/crevices after color and normal are flat. |
+| `--report PATH` | Write the JSON report somewhere other than `<content_folder>/flatten_report.json`. |
+| `-v`, `--verbose` | More detailed logging. |
 
-## Step 3 — Run the flattening script
+### Behavior worth knowing
 
-```bash
-python3 flatten_map_materials.py /path/to/your/addon/content
-```
-
-This walks every `.vmat` under that folder and, for each one:
-
-- Resolves its color texture, computes the average RGB (ignoring fully
-  transparent pixels), desaturates that average to a grey of the same
-  luma, and writes a same-size replacement if any pixel is translucent
-  (preserving the cutout), or a tiny 8×8 flat swatch otherwise.
-- Resolves its normal texture and replaces it with a neutral flat normal
-  (128, 128, 255), preserving that texture's own alpha channel untouched
-  (some Deadlock materials may pack a roughness/smoothness mask there —
-  flattening color and normal shouldn't also silently change that).
-- Writes new `_flat_color.vtex` / `_flat_normal.vtex` stubs (copies of the
-  originals with just the image reference swapped) and rewrites the `.vmat`
-  to point at them, leaving the originals untouched in case you want to
-  revert one material by hand.
-- Writes `content_root/flatten_report.json`, one entry per texture slot
-  touched: which material, which role, the computed color, and whether it
-  succeeded, was skipped, or errored.
-
-Useful flags:
-
-- `--dry-run` — don't touch any material/texture files, but still write
-  `flatten_report.json` so you can review the plan first. Good for a first
-  pass over the whole folder before committing to it.
-- `--keep-hue` — skip the desaturation step and keep each material's own
-  average color instead of converting it to grey.
-- `--flatten-roughness` / `--flatten-ao` — also flatten roughness and
-  ambient-occlusion textures. Not required by the "flat color, no normal
-  map" spec, but AO maps in particular can still visibly darken corners and
-  crevices even after color/normal are flat; turn these on if you want a
-  truly shadowless, uniformly-lit result.
-- `--verbose` — more logging.
-- Safe to re-run: it detects its own `_flat_<role>` outputs and skips them
-  instead of flattening an already-flat texture again.
-
-After it runs, open `flatten_report.json` and check for anything marked
-`"skipped"` or `"error"` — those are texture slots it couldn't confidently
-handle (usually because the `.vtex` stub's format didn't match what it
-expected) and need a manual look.
-
-## Step 4 — Recompile in CSDK 12
-
-1. In CSDK 12's Asset Browser, create a new addon project if you haven't —
-   this gives you paired `content/<addon>` (source) and `game/<addon>`
-   (compiled) folders. If Step 1's export didn't already land inside this
-   addon's `content` folder, move it there now, keeping the `materials/...`
-   path structure intact.
-2. In the Asset Browser, navigate to the folder(s) containing your modified
-   `.vmat`/`.vtex` files, select them (or the parent folder, if batch
-   recompiling a folder works in your CSDK version), right-click, and choose
-   **Recompile > Full**.
-3. Confirm there are no compile errors. A common one is a `.vtex` stub
-   referencing settings your CSDK's shader doesn't recognize — since the
-   originals compiled fine before you touched them, and the script only
-   swaps the image filename inside an otherwise-untouched copy, this should
-   be rare, but if it happens, open the flagged `_flat_*.vtex` and compare
-   it against its original to see what differs.
-
-## Step 5 — Package and install the addon
-
-1. Open CS2 Workshop Manager (bundled with CSDK 12) from the Asset
-   Browser's toolbar, click **New**, fill in placeholder submission info
-   (name/description/preview — the actual Workshop submission will fail,
-   that's expected and fine), and let it build. This produces a VPK under
-   `game/citadel_addons`.
-   - If your addon is large (a full map's worth of materials can add up),
-     use the **Multichunk Workshop Manager** instead to avoid the 2 GB
-     single-VPK limit.
-2. Use the Workshop Manager's **Contents** view to confirm the VPK actually
-   contains your flattened `.vmat`/`.vtex` files and not the whole game.
-3. Rename the resulting file to `pak0N_dir.vpk` (pick an unused number,
-   01–99) and copy it into `<Deadlock install>/game/citadel/addons/`.
-4. Launch Deadlock and load into the map. If nothing changed, double check
-   the addon actually packed the *recompiled* (post-Step-4) versions of the
-   files, not the pre-recompile source.
-
-## Iterating
-
-Because the script never overwrites your originals — it only adds
-`_flat_color`/`_flat_normal` siblings and repoints the `.vmat` — you can
-revert any single material by hand (point its `TextureColor`/`TextureNormal`
-back at the original `.vtex` and recompile just that file), or blow away the
-whole `content` folder and re-decompile if you want to start over. Re-running
-the script after adding more decompiled materials is safe; it won't
-re-touch ones it already flattened.
-
-## Known limitations / things to watch for
-
-- **Scope discovery is manual.** I don't have a way to tell you which exact
-  VPK folders are "the map's meshes" versus hero/item/UI art without seeing
-  your decompile — that part of Step 1 is on you, using Source 2 Viewer's
-  browser.
-- **Shared textures get one shared grey**, by design — if two different
-  building facades used the same tiling brick texture, they'll end up the
-  exact same shade of grey, not two different shades. That's the "average
-  per material" approach; the alternative (a hand-authored category palette
-  where every building is forced to one fixed hardcoded shade regardless of
-  its original texture) was the other option we discussed and didn't go
-  with — let me know if you'd rather have that instead, it's a different
-  script.
-- **Roughness/AO left alone by default**, per above — flip on the flags if
-  you still see shading variation you don't want.
-- **Decal/blend materials** (e.g. a material that blends two textures
-  together, like a dirt-over-concrete blend) may reference *two* color
-  textures under different-looking keys; the script's keyword matching
-  should still catch both if their keys contain "color"/"diffuse", but
-  double check the report for these.
+- **Safe to re-run.** It detects its own `_flat_color`/`_flat_normal`
+  output and skips it instead of flattening an already-flat texture again
+  — so you can decompile more materials later and just run it again.
+- **Shared textures get one shared grey.** If two materials use the same
+  tiling texture, they end up the same shade, since the color comes from
+  averaging that shared texture, not from a per-material category.
+- **Originals are never overwritten** — the script writes new
+  `_flat_color.vtex` / `_flat_normal.vtex` files next to the originals and
+  repoints the `.vmat`, so you can revert a single material by hand.
+- **`flatten_report.json`** lists every texture slot it touched: which
+  material, which role (color/normal/roughness/ao), the resulting color,
+  and its status (`flattened`, `already-flat`, `skipped`, or `error`).
+  Check anything `skipped`/`error` by hand — usually a `.vtex` whose format
+  didn't match what the script expected.
+- **Decal/blend materials** (two color textures blended together) are
+  handled if both texture keys contain "color"/"diffuse"/"albedo" — check
+  the report to confirm both got caught.
