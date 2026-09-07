@@ -1,4 +1,4 @@
-# Deadlock Flat-Shading Map Mod
+# Deadflat - Deadlock Flat-Shading Map Mod
 
 Replaces every map material with a flat grey — no normal maps, no texture
 detail. Each material gets its own shade (luma-matched to its original
@@ -89,3 +89,6 @@ python flatten_map_materials.py <content_folder> [options]
 - **Decal/blend materials** (two color textures blended together) are
   handled if both texture keys contain "color"/"diffuse"/"albedo" — check
   the report to confirm both got caught.
+
+> [!NOTE]
+> This project was generated using Claude Cowork - Sonnet 5
